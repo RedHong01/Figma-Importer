@@ -52,6 +52,17 @@ namespace FigmaImporter.Editor
             _ = EnsureDependenciesInstalledAsync(force);
         }
 
+        internal static bool GetAutoInitializeEnabled()
+        {
+            return IsAutoInitializeEnabled();
+        }
+
+        internal static void SetAutoInitializeEnabled(bool enabled)
+        {
+            EditorPrefs.SetBool(AutoInitEnabledKey, enabled);
+            Menu.SetChecked(AutoInitMenuPath, enabled);
+        }
+
         internal static Task EnsureDependenciesInstalledForImportAsync()
         {
             // Import flow should always attempt a dependency check even when

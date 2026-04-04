@@ -224,16 +224,21 @@ namespace FigmaImporter.Editor
             return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
         }
 
-        public static void SaveTexture(Texture2D texture, string assetPath)
+        public static void SaveTexture(Texture2D texture, string assetPath, bool overwriteExisting = false)
         {
+            if (texture == null || string.IsNullOrWhiteSpace(assetPath))
+            {
+                return;
+            }
+
             var filePath = FigmaPathUtils.ToAbsolutePathFromAssetPath(assetPath);
-            if (File.Exists(filePath))
+            if (File.Exists(filePath) && !overwriteExisting)
             {
                 return;
             }
 
             byte[] bytes = texture.EncodeToPNG();
-            if (bytes != null)
+            if (bytes != null && bytes.Length > 0)
             {
                 var directory = Path.GetDirectoryName(filePath);
                 if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
@@ -241,7 +246,9 @@ namespace FigmaImporter.Editor
                     Directory.CreateDirectory(directory);
                 }
                 System.IO.File.WriteAllBytes(filePath, bytes);
-                UnityEditor.AssetDatabase.Refresh();
+                AssetDatabase.ImportAsset(
+                    FigmaPathUtils.NormalizeAssetPath(assetPath),
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
             }
         }
 
@@ -370,6 +377,7 @@ namespace FigmaImporter.Editor
                 var result = await importer.GetImage(node.id, true, cancellationToken);
                 if (result == null)
                 {
+                    HideInvalidImagePlaceholder(nodeGo);
                     ImportFallbackRegistry.ReportMissingIssue(
                         "Render",
                         node.id,
@@ -383,7 +391,7 @@ namespace FigmaImporter.Editor
                 FigmaNodesProgressInfo.ShowProgress(0f);
                 try
                 {
-                    SaveTexture(result, spriteAssetPath);
+                    SaveTexture(result, spriteAssetPath, overwriteExisting: true);
                     sprite = ImageUtils.ChangeTextureToSprite(spriteAssetPath);
                 }
                 catch (Exception e)
@@ -393,6 +401,7 @@ namespace FigmaImporter.Editor
 
                 if (sprite == null)
                 {
+                    HideInvalidImagePlaceholder(nodeGo);
                     ImportFallbackRegistry.ReportMissingIssue(
                         "Render",
                         node.id,
@@ -419,6 +428,8 @@ namespace FigmaImporter.Editor
                 }
 
                 image.sprite = sprite;
+                image.enabled = true;
+                image.color = UnityEngine.Color.white;
                 return;
             }
 
@@ -431,6 +442,8 @@ namespace FigmaImporter.Editor
                 }
 
                 image.sprite = sprite;
+                image.enabled = true;
+                image.color = UnityEngine.Color.white;
                 t = TransformUtils.EnsureRectTransform(child, "Render child");
                 if (t != null)
                 {
@@ -455,6 +468,24 @@ namespace FigmaImporter.Editor
             }
 
             return ChangeTextureToSprite(spriteAssetPath);
+        }
+
+        private static void HideInvalidImagePlaceholder(GameObject nodeGo)
+        {
+            if (nodeGo == null)
+            {
+                return;
+            }
+
+            var image = nodeGo.GetComponent<Image>();
+            if (image == null || image.sprite != null)
+            {
+                return;
+            }
+
+            image.enabled = false;
+            var color = image.color;
+            image.color = new UnityEngine.Color(color.r, color.g, color.b, 0f);
         }
 
         public static string ResolveFillSpriteAssetPath(FigmaImporter importer, Node node, int fillIndex)

@@ -38,7 +38,7 @@ namespace FigmaImporter.Editor
         {
             private const string HelpRoot = Root + "/Help";
 
-            public const string QuickStartTutorial = HelpRoot + "/Quick Start Tutorial";
+            public const string QuickStartTutorial = HelpRoot + "/Flow Studio";
             public const string OpenReadme = HelpRoot + "/Open README";
             public const string OpenDiagnosticsHub = HelpRoot + "/Open Diagnostics Hub";
         }

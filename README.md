@@ -41,6 +41,16 @@ This is the preferred consumer install path because it does not depend on the so
 
 Use this option only when you intentionally want to consume the package from the source repository. If the source repository is private, users need their own access to that repository.
 
+## Optional Sync-Back Interface
+
+This repository can remain independent while still accepting **optional** sync proposals from consumer repositories.
+
+- Receiver workflow: `.github/workflows/receive-consumer-sync.yml`
+- Guide and sender example: `Documentation~/sync-back.md`
+- Trigger model: manual by default, optional auto dispatch after secure setup
+
+The sync pipeline opens a PR for review instead of writing directly to `main`.
+
 ## Menu Entry Points
 
 - `Window/FigmaImporter/Importer/Open Importer`
@@ -50,7 +60,7 @@ Use this option only when you intentionally want to consume the package from the
 - `Window/FigmaImporter/Diagnostics/Error Fix/Importer Error Handoff`
 - `Window/FigmaImporter/Dependencies/Initialize Dependencies Now`
 - `Window/FigmaImporter/Dependencies/Auto Initialize Dependencies`
-- `Window/FigmaImporter/Help/Quick Start Tutorial`
+- `Window/FigmaImporter/Help/Flow Studio`
 - `Window/FigmaImporter/Help/Open README`
 - `Window/FigmaImporter/Help/Open Diagnostics Hub`
 
@@ -58,7 +68,7 @@ Use this option only when you intentionally want to consume the package from the
 
 Open:
 
-- `Window/FigmaImporter/Help/Quick Start Tutorial`
+- `Window/FigmaImporter/Help/Flow Studio`
 
 The tutorial walks new users through:
 

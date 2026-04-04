@@ -11,17 +11,19 @@ using UnityEditor.PackageManager;
 using UnityEditor.PackageManager.Requests;
 using UnityEngine;
 using UnityEngine.Networking;
+using System.Linq;
 using Random = UnityEngine.Random;
 
 namespace FigmaImporter.Editor
 {
     public class FigmaImporter : EditorWindow
     {
+        internal const string WindowTitle = "Figma Importer";
+
         [MenuItem(FigmaImporterMenuPaths.Importer.OpenWindow)]
         static void Init()
         {
-            FigmaImporter window = (FigmaImporter)EditorWindow.GetWindow(typeof(FigmaImporter));
-            window.Show();
+            OpenOrCreate(focus: true);
         }
 
         private static FigmaImporterSettings _settings = null;
@@ -43,6 +45,7 @@ namespace FigmaImporter.Editor
         private const int SequentialRequestGapMs = 220;
         private const int RequestTimeoutSeconds = 60;
         private const int RequestStallThresholdSeconds = 20;
+        private const int RequestStallThresholdSecondsWindows = 45;
         private const int GenerationStallThresholdSeconds = 45;
         private const float RequestProgressEpsilon = 0.0005f;
         private const string VectorGraphicsPackageName = "com.unity.vectorgraphics";
@@ -65,6 +68,143 @@ namespace FigmaImporter.Editor
         public float Scale => _scale;
         internal string CurrentFigmaUrl => _settings != null ? _settings.Url : string.Empty;
         internal string CurrentFileKey => _fileName;
+        internal static string MaskTokenForDisplay(string token) => MaskToken(token);
+        internal GameObject SelectedRootObject
+        {
+            get => _rootObject;
+            set => _rootObject = value;
+        }
+        internal int LoadedNodeCount => _nodes != null ? _nodes.Count : 0;
+        internal bool HasLoadedNodeData => _nodes != null && _nodes.Count > 0;
+        internal bool IsGenerationRunning => _isGenerating;
+        internal string GenerationStatusText => _generationStatusText;
+        internal MessageType GenerationStatusType => _generationStatusType;
+
+        internal static FigmaImporter OpenOrCreate(bool focus)
+        {
+            var window = GetWindow<FigmaImporter>(WindowTitle);
+            window.Show();
+            if (focus)
+            {
+                window.Focus();
+            }
+
+            return window;
+        }
+
+        internal static FigmaImporter FindOpenInstance()
+        {
+            return Resources.FindObjectsOfTypeAll<FigmaImporter>().FirstOrDefault();
+        }
+
+        internal static GameObject GetSelectedRootObjectForFlow()
+        {
+            return _rootObject;
+        }
+
+        internal static void SetSelectedRootObjectForFlow(GameObject rootObject)
+        {
+            _rootObject = rootObject;
+        }
+
+        internal static int GetLoadedNodeCountForFlow()
+        {
+            return _nodes != null ? _nodes.Count : 0;
+        }
+
+        internal static bool HasLoadedNodeDataForFlow()
+        {
+            return _nodes != null && _nodes.Count > 0;
+        }
+
+        internal static string GetGenerationStatusTextForFlow()
+        {
+            var instance = FindOpenInstance();
+            return instance != null ? instance._generationStatusText : "Idle";
+        }
+
+        internal static MessageType GetGenerationStatusTypeForFlow()
+        {
+            var instance = FindOpenInstance();
+            return instance != null ? instance._generationStatusType : MessageType.None;
+        }
+
+        internal static bool IsGenerationRunningForFlow()
+        {
+            var instance = FindOpenInstance();
+            return instance != null && instance._isGenerating;
+        }
+
+        internal static void OpenOAuthUrlFromFlow()
+        {
+            OpenOrCreate(focus: false).OpenOauthUrl();
+        }
+
+        internal static string RequestOAuthTokenFromFlow()
+        {
+            return OpenOrCreate(focus: false).RequestOAuthTokenForFlow();
+        }
+
+        internal static void FetchNodeDataFromFlow()
+        {
+            OpenOrCreate(focus: false).FetchNodeDataForFlow();
+        }
+
+        internal static void GenerateNodesFromFlow()
+        {
+            OpenOrCreate(focus: false).GenerateNodesForFlow();
+        }
+
+        internal string RequestOAuthTokenForFlow()
+        {
+            if (_settings == null)
+            {
+                _settings = FigmaImporterSettings.GetInstance();
+            }
+
+            _settings.Token = GetOAuthToken();
+            Repaint();
+            return _settings.Token;
+        }
+
+        internal void FetchNodeDataForFlow()
+        {
+            if (_settings == null)
+            {
+                _settings = FigmaImporterSettings.GetInstance();
+            }
+
+            if (_isGenerating)
+            {
+                return;
+            }
+
+            var apiUrl = ConvertToApiUrl(_settings.Url);
+            if (string.IsNullOrEmpty(apiUrl))
+            {
+                return;
+            }
+
+            SetGenerationStatus("Loading node data...", MessageType.Info);
+            _ = GetNodes(apiUrl, origin: "Flow Get Node Data");
+            Repaint();
+        }
+
+        internal void GenerateNodesForFlow()
+        {
+            if (_settings == null)
+            {
+                _settings = FigmaImporterSettings.GetInstance();
+            }
+
+            if (_isGenerating)
+            {
+                return;
+            }
+
+            TriggerGenerateNodes();
+            Repaint();
+        }
 
         internal void ApplyTextRenderingPipeline(TextMeshProUGUI tmp, Node node)
         {
@@ -1132,7 +1272,14 @@ namespace FigmaImporter.Editor
 
             if (_texturesCache.TryGetValue(nodeId, out var tex))
             {
-                return _texturesCache[nodeId];
+                if (tex != null)
+                {
+                    return tex;
+                }
+
+                // A previous attempt can fail and leave a null cache entry.
+                // Remove it so later retries can recover.
+                _texturesCache.Remove(nodeId);
             }
 
             string request = string.Format(CultureInfo.InvariantCulture, ImagesUrl, _fileName, UnityWebRequest.EscapeURL(nodeId), _scale);
@@ -1150,7 +1297,10 @@ namespace FigmaImporter.Editor
                 if (s.Contains("http"))
                 {
                     var texture = await LoadTextureByUrl(s, showProgress, cancellationToken);
-                    _texturesCache[nodeId] = texture;
+                    if (texture != null)
+                    {
+                        _texturesCache[nodeId] = texture;
+                    }
                     return texture;
                 }
             }
@@ -1360,6 +1510,7 @@ namespace FigmaImporter.Editor
             CancellationToken cancellationToken)
         {
             SetActiveRequest(request, progressInfo);
+            var stallThresholdSeconds = GetRequestStallThresholdSeconds();
             var lastProgress = 0f;
             ulong lastDownloadedBytes = 0;
             var lastActivityUtc = DateTime.UtcNow;
@@ -1378,7 +1529,7 @@ namespace FigmaImporter.Editor
                         lastDownloadedBytes = downloadedBytes;
                         lastActivityUtc = DateTime.UtcNow;
                     }
-                    else if ((DateTime.UtcNow - lastActivityUtc).TotalSeconds >= RequestStallThresholdSeconds)
+                    else if ((DateTime.UtcNow - lastActivityUtc).TotalSeconds >= stallThresholdSeconds)
                     {
                         try
                         {
@@ -1389,7 +1540,7 @@ namespace FigmaImporter.Editor
                         }
 
                         var stallReason =
-                            $"Request stalled while {progressInfo} (no progress for {RequestStallThresholdSeconds}s).";
+                            $"Request stalled while {progressInfo} (no progress for {stallThresholdSeconds}s).";
                         FigmaNodesProgressInfo.CurrentInfo = stallReason;
                         if (showProgress)
                         {
@@ -1412,6 +1563,13 @@ namespace FigmaImporter.Editor
             }
 
             return null;
+        }
+
+        private static int GetRequestStallThresholdSeconds()
+        {
+            return Application.platform == RuntimePlatform.WindowsEditor
+                ? RequestStallThresholdSecondsWindows
+                : RequestStallThresholdSeconds;
         }
 
         private string BuildRequestFailureReason(UnityWebRequest request, string stage, string stallReason = null)

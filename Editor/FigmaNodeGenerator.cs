@@ -205,7 +205,7 @@ namespace FigmaImporter.Editor
                     else
                     {
                         AddText(node, nodeGo);
-                        AddFills(node, nodeGo);
+                        await AddFills(node, nodeGo);
                         if (node.children == null || !includeChildren) break;
                     }
                     if (node.children == null || !includeChildren) break;
@@ -421,7 +421,7 @@ namespace FigmaImporter.Editor
         
 
 
-        private void AddFills(Node node, GameObject nodeGo)
+        private async Task AddFills(Node node, GameObject nodeGo)
         {
             if (node.fills == null || node.fills.Length == 0)
             {
@@ -430,20 +430,30 @@ namespace FigmaImporter.Editor
 
             var gg = GetGradientsGenerator();
             Image image = nodeGo.GetComponent<Image>();
-            if (node.fills.Length > 0f && image == null && nodeGo.GetComponent<Graphic>()==null)
-                image = nodeGo.AddComponent<Image>();
-            
             var tmp = nodeGo.GetComponent<TextMeshProUGUI>();
+            var appliedVisualToImage = false;
+            var hasVisibleImageFill = false;
             
             for (var index = 0; index < node.fills.Length; index++)
             {
                 var fill = node.fills[index];
+                if (fill == null)
+                {
+                    continue;
+                }
+
+                var fillVisible = fill.visible != "false";
+                if (string.Equals(fill.type, "IMAGE", StringComparison.OrdinalIgnoreCase) && fillVisible)
+                {
+                    hasVisibleImageFill = true;
+                }
+
                 if (index != 0)
                 {
                     var go = TransformUtils.InstantiateChild(nodeGo, fill.type);
-                    if (fill.visible != "false")
+                    if (fillVisible)
                     {
-                        image = go.AddComponent<Image>();
+                        image = go.GetComponent<Image>() ?? go.AddComponent<Image>();
                     }
                 }
 
@@ -451,9 +461,18 @@ namespace FigmaImporter.Editor
                 {
                     case "SOLID":
                         if (tmp != null)
+                        {
                             tmp.color = fill.color.ToColor();
+                        }
                         else
+                        {
+                            if (image == null)
+                            {
+                                image = nodeGo.GetComponent<Image>() ?? nodeGo.AddComponent<Image>();
+                            }
                             image.color = fill.color.ToColor();
+                            appliedVisualToImage = true;
+                        }
                         break;
                     case "GRADIENT_LINEAR" when tmp != null:
                         var gradient = fill.gradientStops;
@@ -464,7 +483,18 @@ namespace FigmaImporter.Editor
                         var fourthColor = gradient.Length <= 3 ? thirdColor : ColorUtils.ConvertToUnityColor(gradient[3].color); 
                         tmp.colorGradient = new VertexGradient(firstColor, secondColor, thirdColor, fourthColor);
                         break;
-                    default:
+                    case "IMAGE":
+                        await ImageUtils.RenderNodeAndApply(node, nodeGo, _importer, _cancellationToken);
+                        var renderedImage = nodeGo.GetComponent<Image>();
+                        if (renderedImage != null && renderedImage.sprite != null)
+                        {
+                            appliedVisualToImage = true;
+                        }
+                        break;
+                    case "GRADIENT_LINEAR":
+                    case "GRADIENT_RADIAL":
+                    case "GRADIENT_DIAMOND":
+                    case "GRADIENT_ANGULAR":
                         if (image == null)
                         {
                             image = nodeGo.GetComponent<Image>() ?? nodeGo.AddComponent<Image>();
@@ -487,12 +517,33 @@ namespace FigmaImporter.Editor
                         if (sprite != null)
                         {
                             image.sprite = sprite;
+                            image.color = UnityEngine.Color.white;
+                            appliedVisualToImage = true;
                         }
+                        break;
+                    default:
+                        // Keep unsupported fill types from creating white placeholders.
+                        ImportFallbackRegistry.ReportMissingIssue(
+                            "Fill",
+                            node.id,
+                            $"Unsupported fill type '{fill.type}' in Generate mode.",
+                            node.id,
+                            node.name);
                         break;
                 }
 
-                if (image != null) 
-                    image.enabled = fill.visible != "false";
+                if (image != null)
+                {
+                    image.enabled = fillVisible;
+                }
+            }
+
+            if (hasVisibleImageFill && image != null && image.sprite == null && !appliedVisualToImage && tmp == null)
+            {
+                // If image fills fail to render, avoid leaving default white Image placeholders.
+                image.enabled = false;
+                var c = image.color;
+                image.color = new UnityEngine.Color(c.r, c.g, c.b, 0f);
             }
         }
 

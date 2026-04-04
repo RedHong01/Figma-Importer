@@ -1,0 +1,249 @@
+name: Consumer Sync Proposal
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_repo:
+        description: "Source repository in owner/repo format"
+        required: true
+        type: string
+      source_ref:
+        description: "Branch, tag, or SHA from source repo"
+        required: false
+        default: "main"
+        type: string
+      package_path:
+        description: "Path to package root in source repo"
+        required: true
+        default: "Packages/com.redhong01.figma_to_unity_importer"
+        type: string
+      reason:
+        description: "Reason for this sync proposal"
+        required: false
+        type: string
+  repository_dispatch:
+    types:
+      - figma-importer-sync
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SYNC_SOURCE_TOKEN: ${{ secrets.SYNC_SOURCE_TOKEN }}
+      ALLOWED_SYNC_SOURCE_REPOS: ${{ vars.ALLOWED_SYNC_SOURCE_REPOS }}
+      ENABLE_AUTO_SYNC_DISPATCH: ${{ vars.ENABLE_AUTO_SYNC_DISPATCH }}
+      DISPATCH_SHARED_SECRET: ${{ secrets.DISPATCH_SHARED_SECRET }}
+    steps:
+      - name: Checkout target repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate request
+        id: req
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          trigger_mode="manual"
+          source_sha=""
+
+          if [[ "$GITHUB_EVENT_NAME" == "repository_dispatch" ]]; then
+            trigger_mode="auto-dispatch"
+
+            if [[ "${ENABLE_AUTO_SYNC_DISPATCH:-}" != "true" ]]; then
+              echo "Auto dispatch is disabled. Set ENABLE_AUTO_SYNC_DISPATCH=true to enable."
+              exit 1
+            fi
+
+            if [[ -z "${ALLOWED_SYNC_SOURCE_REPOS:-}" ]]; then
+              echo "ALLOWED_SYNC_SOURCE_REPOS is required for auto-dispatch mode."
+              exit 1
+            fi
+
+            source_repo="$(jq -r '.client_payload.source_repo // empty' "$GITHUB_EVENT_PATH")"
+            source_ref="$(jq -r '.client_payload.source_ref // "main"' "$GITHUB_EVENT_PATH")"
+            package_path="$(jq -r '.client_payload.package_path // empty' "$GITHUB_EVENT_PATH")"
+            source_sha="$(jq -r '.client_payload.source_sha // empty' "$GITHUB_EVENT_PATH")"
+            reason="$(jq -r '.client_payload.reason // ""' "$GITHUB_EVENT_PATH")"
+            provided_secret="$(jq -r '.client_payload.dispatch_secret // empty' "$GITHUB_EVENT_PATH")"
+
+            if [[ -n "${DISPATCH_SHARED_SECRET:-}" ]]; then
+              if [[ -z "$provided_secret" || "$provided_secret" != "${DISPATCH_SHARED_SECRET}" ]]; then
+                echo "dispatch_secret validation failed."
+                exit 1
+              fi
+            fi
+          else
+            source_repo="${{ inputs.source_repo }}"
+            source_ref="${{ inputs.source_ref }}"
+            package_path="${{ inputs.package_path }}"
+            reason="${{ inputs.reason }}"
+          fi
+
+          if [[ -z "$source_repo" || -z "$package_path" ]]; then
+            echo "source_repo and package_path are required."
+            exit 1
+          fi
+
+          if [[ "$package_path" = /* || "$package_path" == *".."* ]]; then
+            echo "package_path must be a safe relative path."
+            exit 1
+          fi
+
+          if [[ -n "${ALLOWED_SYNC_SOURCE_REPOS}" ]]; then
+            allowed="false"
+            IFS=',' read -ra repos <<< "${ALLOWED_SYNC_SOURCE_REPOS}"
+            for item in "${repos[@]}"; do
+              trimmed="$(echo "$item" | xargs)"
+              if [[ "$trimmed" == "$source_repo" ]]; then
+                allowed="true"
+                break
+              fi
+            done
+
+            if [[ "$allowed" != "true" ]]; then
+              echo "Source repo '$source_repo' is not allowlisted."
+              echo "Set repo variable ALLOWED_SYNC_SOURCE_REPOS to include it."
+              exit 1
+            fi
+          fi
+
+          echo "source_repo=$source_repo" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "package_path=$package_path" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "trigger_mode=$trigger_mode" >> "$GITHUB_OUTPUT"
+          {
+            echo "reason<<EOF"
+            echo "$reason"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Clone source repo
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_repo="${{ steps.req.outputs.source_repo }}"
+          source_ref="${{ steps.req.outputs.source_ref }}"
+          source_sha="${{ steps.req.outputs.source_sha }}"
+
+          rm -rf _source_repo
+
+          if [[ -n "${SYNC_SOURCE_TOKEN}" ]]; then
+            git clone --filter=blob:none "https://x-access-token:${SYNC_SOURCE_TOKEN}@github.com/${source_repo}.git" _source_repo
+          else
+            git clone --filter=blob:none "https://github.com/${source_repo}.git" _source_repo
+          fi
+
+          if [[ -n "$source_sha" ]]; then
+            git -C _source_repo checkout "$source_sha"
+          else
+            git -C _source_repo checkout "$source_ref"
+          fi
+
+          resolved_sha="$(git -C _source_repo rev-parse HEAD)"
+          short_sha="$(git -C _source_repo rev-parse --short HEAD)"
+
+          echo "resolved_sha=$resolved_sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Sync package content
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          package_path="${{ steps.req.outputs.package_path }}"
+          src="_source_repo/${package_path}"
+
+          if [[ ! -d "$src" ]]; then
+            echo "Package path '$package_path' not found in source repo."
+            exit 1
+          fi
+
+          rsync -a --delete \
+            --exclude ".git/" \
+            --exclude ".github/" \
+            "$src/" "./"
+
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop when no changes
+        if: steps.sync.outputs.changed == 'false'
+        run: echo "No package changes to sync."
+
+      - name: Commit and push sync branch
+        if: steps.sync.outputs.changed == 'true'
+        id: commit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          source_repo="${{ steps.req.outputs.source_repo }}"
+          source_ref="${{ steps.req.outputs.source_ref }}"
+          source_sha="${{ steps.req.outputs.source_sha }}"
+          trigger_mode="${{ steps.req.outputs.trigger_mode }}"
+          resolved_sha="${{ steps.source.outputs.resolved_sha }}"
+          short_sha="${{ steps.source.outputs.short_sha }}"
+
+          safe_repo="${source_repo//\//-}"
+          branch="sync/${safe_repo}-${short_sha}-$(date -u +%Y%m%d%H%M%S)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "$branch"
+          git add -A
+          git commit -m "sync: import ${source_repo}@${short_sha}"
+          git push origin "$branch"
+
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "source_ref=$source_ref" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "trigger_mode=$trigger_mode" >> "$GITHUB_OUTPUT"
+
+      - name: Open pull request
+        if: steps.sync.outputs.changed == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          default_branch="$(gh repo view --json defaultBranchRef -q '.defaultBranchRef.name')"
+          source_repo="${{ steps.req.outputs.source_repo }}"
+          source_ref="${{ steps.commit.outputs.source_ref }}"
+          source_sha="${{ steps.commit.outputs.source_sha }}"
+          trigger_mode="${{ steps.commit.outputs.trigger_mode }}"
+          resolved_sha="${{ steps.source.outputs.resolved_sha }}"
+          reason="${{ steps.req.outputs.reason }}"
+          branch="${{ steps.commit.outputs.branch }}"
+
+          body=$'Sync proposal from a consumer repository.\n\n'
+          body+="- Trigger mode: \`${trigger_mode}\`\n"
+          body+="- Source repo: \`${source_repo}\`\n"
+          body+="- Source ref: \`${source_ref}\`\n"
+          if [[ -n "$source_sha" ]]; then
+            body+="- Requested source SHA: \`${source_sha}\`\n"
+          fi
+          body+="- Resolved source SHA: \`${resolved_sha}\`\n"
+          if [[ -n "$reason" ]]; then
+            body+="- Reason: ${reason}\n"
+          fi
+          body+=$'\nPlease review before merge.'
+
+          gh pr create \
+            --base "$default_branch" \
+            --head "$branch" \
+            --title "Sync importer from ${source_repo}@${resolved_sha:0:7}" \
+            --body "$body"
