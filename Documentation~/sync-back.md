@@ -31,10 +31,11 @@ Consumer repositories can contribute updates in two modes:
 Set these in `RedHong01/Figma-Importer`:
 
 1. Repository variable `ENABLE_AUTO_SYNC_DISPATCH=true`.
-2. Repository variable `ALLOWED_SYNC_SOURCE_REPOS` as comma-separated `owner/repo`.
+2. Repository secret `DISPATCH_SHARED_SECRET` (required in auto mode).
+   - Incoming payload must include matching `dispatch_secret`.
+3. Optional repository variable `ALLOWED_SYNC_SOURCE_REPOS` as comma-separated `owner/repo`.
+   - If omitted, any source repo is accepted as long as dispatch token + shared secret are valid.
    - Example: `RedHong01/AltControl2_TeamC_MushroomGame,YourOrg/AnotherGameRepo`
-3. Optional but recommended secret `DISPATCH_SHARED_SECRET`.
-   - If configured, incoming payload must include matching `dispatch_secret`.
 4. Optional secret `SYNC_SOURCE_TOKEN` with read access when source repos are private.
 
 Without step 1, auto dispatch requests are rejected.

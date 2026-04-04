@@ -42,16 +42,17 @@ namespace FigmaImporter.Editor
                     return;
                 }
 
+                var normalizedStep = step ?? string.Empty;
                 if (!allowDuplicate)
                 {
                     if (LastStepByChain.TryGetValue(chainId, out var lastStep) &&
-                        string.Equals(lastStep, step, StringComparison.Ordinal))
+                        string.Equals(lastStep, normalizedStep, StringComparison.Ordinal))
                     {
                         return;
                     }
-
-                    LastStepByChain[chainId] = step ?? string.Empty;
                 }
+
+                LastStepByChain[chainId] = normalizedStep;
             }
 
             LogFlow($"[FigmaImporter][Flow][{feature}][{chainId}] STEP {Safe(step)} details={Safe(details)}");

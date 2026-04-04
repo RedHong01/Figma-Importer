@@ -48,6 +48,7 @@ This repository can remain independent while still accepting **optional** sync p
 - Receiver workflow: `.github/workflows/receive-consumer-sync.yml`
 - Guide and sender example: `Documentation~/sync-back.md`
 - Trigger model: manual by default, optional auto dispatch after secure setup
+- Auto dispatch gate: valid dispatch token + matching `dispatch_secret` (allowlist optional)
 
 The sync pipeline opens a PR for review instead of writing directly to `main`.
 

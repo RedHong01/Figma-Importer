@@ -161,7 +161,9 @@ namespace FigmaImporter.Editor
                 var label = $"{i + 1}. {StageLabels[i]} {(complete ? "✓" : "○")}";
 
                 var cachedColor = GUI.color;
-                GUI.color = active ? new Color(0.74f, 0.90f, 1f) : Color.white;
+                GUI.color = active
+                    ? new UnityEngine.Color(0.74f, 0.90f, 1f, 1f)
+                    : UnityEngine.Color.white;
                 if (GUILayout.Button(label, GUILayout.Height(28f)))
                 {
                     _activeStage = stage;
