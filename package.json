@@ -1,6 +1,6 @@
 {
   "name": "com.redhong01.figma_to_unity_importer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "displayName": "Figma To Unity Importer",
   "description": "Original Figma importer by ManakhovN, extended by RedHong01 with event-flow improvements and macOS package workflow optimizations.",
   "unity": "6000.0",
