@@ -186,7 +186,7 @@ namespace FigmaImporter.Editor
             }
 
             SetGenerationStatus("Loading node data...", MessageType.Info);
-            _ = GetNodes(apiUrl, origin: "Flow Get Node Data");
+            RunBackgroundTask(GetNodes(apiUrl, origin: "Flow Get Node Data"), "Flow Get Node Data");
             Repaint();
         }
 
@@ -275,7 +275,8 @@ namespace FigmaImporter.Editor
                     {
                         return;
                     }
-                    _ = GetNodes(apiUrl, origin: "Manual Get Node Data");
+                    SetGenerationStatus("Loading node data...", MessageType.Info);
+                    RunBackgroundTask(GetNodes(apiUrl, origin: "Manual Get Node Data"), "Manual Get Node Data");
                 }
             }
 
@@ -661,7 +662,34 @@ namespace FigmaImporter.Editor
             }
 
             SetGenerationStatus("Running...", MessageType.Info);
-            _ = GetFileAsync(apiUrl, "Generate Nodes");
+            RunBackgroundTask(GetFileAsync(apiUrl, "Generate Nodes"), "Generate Nodes");
+        }
+
+        private async void RunBackgroundTask(Task task, string context)
+        {
+            if (task == null)
+            {
+                return;
+            }
+
+            try
+            {
+                await task;
+            }
+            catch (OperationCanceledException)
+            {
+                SetGenerationStatus("Canceled.", MessageType.Warning);
+                Debug.Log($"[FigmaImporter] {context} canceled.");
+            }
+            catch (Exception e)
+            {
+                SetGenerationStatus($"Failed: {e.Message}", MessageType.Error);
+                Debug.LogException(e);
+            }
+            finally
+            {
+                Repaint();
+            }
         }
 
         private void RecoverStaleGenerationStateIfNeeded()
@@ -738,6 +766,16 @@ namespace FigmaImporter.Editor
                 FigmaNodesProgressInfo.CurrentTitle = "Loading node data";
                 FigmaImporterEventFlow.Step("GetNodes", flowChainId, "RequestNodeInfo");
                 _nodes = await GetNodeInfo(url, cancellationToken);
+                if (_nodes == null)
+                {
+                    throw new InvalidOperationException("Failed to load node data from Figma.");
+                }
+
+                if (_nodes.Count == 0)
+                {
+                    throw new InvalidOperationException("Figma response did not contain any parsable nodes.");
+                }
+
                 flowDetails = $"nodes={_nodes?.Count ?? 0}";
                 FigmaImporterEventFlow.Step("GetNodes", flowChainId, "NodeInfoLoaded", flowDetails);
             }
@@ -1014,9 +1052,8 @@ namespace FigmaImporter.Editor
         {
             if (_rootObject == null)
             {
-                Debug.LogError(
-                    $"[FigmaImporter] Root object is null. Please add reference to a Canvas or previous version of the object");
-                return;
+                throw new InvalidOperationException(
+                    "[FigmaImporter] Root object is null. Please add reference to a Canvas or previous version of the object.");
             }
 
             ImportFallbackRegistry.BeginGenerationSession("Generate nodes");
@@ -1038,6 +1075,10 @@ namespace FigmaImporter.Editor
                     cancellationToken,
                     resetControlFlags: false,
                     origin: "Generate Nodes preflight");
+                if (_nodes == null || _nodes.Count == 0)
+                {
+                    throw new InvalidOperationException("Node generation aborted because no Figma nodes were loaded.");
+                }
             }
 
             await FigmaPackageBootstrapper.EnsureDependenciesInstalledForImportAsync();
@@ -1046,8 +1087,7 @@ namespace FigmaImporter.Editor
             var nodeTreeElements = ResolveNodeTreeElementsForGeneration();
             if (nodeTreeElements == null)
             {
-                Debug.LogError("[FigmaImporter] Node tree is not initialized. Click 'Get Node Data' first.");
-                return;
+                throw new InvalidOperationException("Node tree is not initialized. Click 'Get Node Data' first.");
             }
 
             FigmaNodesProgressInfo.CurrentNode = 0;
@@ -1057,9 +1097,8 @@ namespace FigmaImporter.Editor
             {
                 if (_isRateLimited)
                 {
-                    Debug.LogError(
-                        "[FigmaImporter] Node generation stopped due to Figma API rate limit (HTTP 429). Please wait and retry.");
-                    break;
+                    throw new InvalidOperationException(
+                        "Node generation stopped due to Figma API rate limit (HTTP 429). Please wait and retry.");
                 }
                 ThrowIfStopRequested(cancellationToken);
                 await WaitWhilePausedAsync(cancellationToken);
@@ -1094,6 +1133,10 @@ namespace FigmaImporter.Editor
 
             var previousRootObject = _rootObject;
             var previousUrl = _settings.Url;
+            var previousFileName = _fileName;
+            var previousNodeId = _nodeId;
+            var previousNodes = _nodes;
+            var previousLastClickedNode = _lastClickedNode;
 
             try
             {
@@ -1128,6 +1171,11 @@ namespace FigmaImporter.Editor
             {
                 _rootObject = previousRootObject;
                 _settings.Url = previousUrl;
+                _fileName = previousFileName;
+                _nodeId = previousNodeId;
+                _nodes = previousNodes;
+                _treeView = null;
+                _lastClickedNode = previousLastClickedNode;
                 Repaint();
             }
         }

@@ -18,7 +18,7 @@ This package uses a unified event flow logger:
 - STEP: optional `CancelRequested` (`User requested cancel` or `Auto cancel due to generation stall`)
 - STEP: optional `GenerationStallDetected`
 - STEP: optional `ForceResetGenerationState`
-- END: `Completed` / `Canceled` / `Failed` / `Superseded` / `WindowDestroyed`
+- END: `Completed` / `Canceled` / `Failed` / `Superseded` / `ForceReset` / `WindowDestroyed`
 
 `GetNodes`
 
@@ -26,7 +26,7 @@ This package uses a unified event flow logger:
 - STEP: optional `ResetControlFlags` (manual flow only)
 - STEP: `RequestNodeInfo`
 - STEP: `NodeInfoLoaded`
-- END: `Completed` / `Canceled` / `Failed`
+- END: `Completed` / `Canceled` / `Failed` (`Failed` when request returns no parsable nodes)
 
 `Diagnostics`
 
@@ -58,7 +58,7 @@ This package uses a unified event flow logger:
 - START: force init or auto init
 - STEP: `MissingDependenciesDetected`
 - STEP: repeated `DependencyInstallAttempt`
-- END: `Completed` / `Skipped` / `Failed`
+- END: `Completed` / `Skipped` / `Failed` (`Skipped` also covers an already-running init session)
 
 `FrameSyncCheck`
 
@@ -73,6 +73,7 @@ This package uses a unified event flow logger:
 
 - START: `Apply Selected Changes To Unity Frame` from `FigmaFrameSyncBinding` inspector
 - STEP: `SelectionValidated`
+- STEP: optional `OperationPlanBuilt`
 - STEP: optional `Applied`
 - END: `Completed` / `Skipped` / `Canceled` / `Failed`
 

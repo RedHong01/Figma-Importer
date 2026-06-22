@@ -142,6 +142,15 @@ namespace FigmaImporter.Editor
         {
             if (SessionState.GetBool(SessionRunningKey, false))
             {
+                var skippedChainId = FigmaImporterEventFlow.Start(
+                    "Dependencies",
+                    force ? "Initialize Dependencies (Force)" : "Auto Initialize Dependencies",
+                    $"force={force}; existingSession=true");
+                FigmaImporterEventFlow.End(
+                    "Dependencies",
+                    skippedChainId,
+                    "Skipped",
+                    "Dependency initialization already running");
                 return;
             }
 
