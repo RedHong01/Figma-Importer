@@ -418,7 +418,7 @@ namespace FigmaImporter.Editor
             using (new EditorGUI.DisabledScope(!_settings.EnableTypographyAdapter))
             {
                 _settings.EnableTypographyScaleCorrection = EditorGUILayout.ToggleLeft(
-                    "Enable Dynamic Scale Fix",
+                    "Enable Auto-size Metrics Correction",
                     _settings.EnableTypographyScaleCorrection);
                 _settings.EscapeTypographyInputText = EditorGUILayout.ToggleLeft(
                     "Escape Input Text For Rich Tags",

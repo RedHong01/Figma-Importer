@@ -327,7 +327,14 @@ namespace FigmaImporter.Editor
         {
             if (TryGetRelativeTranslation(node?.relativeTransform, out var localFromMatrix))
             {
-                return localFromMatrix + ResolveRenderableOriginOffset(node);
+                var localTopLeft = localFromMatrix;
+                if (parentNode == null)
+                {
+                    // Top-level Figma transforms are page-local, while Unity imports under the selected root.
+                    localTopLeft -= offset;
+                }
+
+                return localTopLeft + ResolveRenderableOriginOffset(node);
             }
 
             if (boundingBox == null)
@@ -475,12 +482,6 @@ namespace FigmaImporter.Editor
 
         private static Vector2 ResolveLocalCenter(Node node, AbsoluteBoundingBox boundingBox, Vector2 localTopLeft)
         {
-            if (TryGetRelativeTranslation(node?.relativeTransform, out var localFromMatrix))
-            {
-                var resolvedSize = ResolveNodeSize(node, boundingBox);
-                return localFromMatrix + (resolvedSize * 0.5f);
-            }
-
             if (boundingBox != null)
             {
                 var resolvedSize = ResolveNodeSize(node, boundingBox);

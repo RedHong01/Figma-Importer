@@ -412,44 +412,52 @@ namespace FigmaImporter.Editor
                 }
             }
 
-            var t = TransformUtils.EnsureRectTransform(nodeGo, "Render");
-            if (t == null)
+            ApplySpriteToNodeRect(nodeGo, sprite);
+        }
+
+        private static void ApplySpriteToNodeRect(GameObject nodeGo, Sprite sprite)
+        {
+            if (nodeGo == null || sprite == null)
             {
                 return;
             }
 
-            Image image = null;
-            if (Math.Abs(t.rect.width - sprite.texture.width) < 1f &&
-                Math.Abs(t.rect.height - sprite.texture.height) < 1f)
+            var rectTransform = TransformUtils.EnsureRectTransform(nodeGo, "Render");
+            if (rectTransform == null)
             {
-                if (!nodeGo.TryGetComponent(out image))
-                {
-                    image = nodeGo.AddComponent<Image>();
-                }
-
-                image.sprite = sprite;
-                image.enabled = true;
-                image.color = UnityEngine.Color.white;
                 return;
             }
 
-            var child = TransformUtils.InstantiateChild(nodeGo, "Render");
-            if (sprite != null)
+            RemoveGeneratedRenderChildren(rectTransform);
+
+            // Figma export pixels can differ from Unity UI layout size after API scaling or texture import.
+            // Keep RectTransform as the source of truth so raster nodes stay aligned with native nodes.
+            var image = nodeGo.GetComponent<Image>() ?? nodeGo.AddComponent<Image>();
+            image.sprite = sprite;
+            image.type = Image.Type.Simple;
+            image.preserveAspect = false;
+            image.enabled = true;
+            image.color = UnityEngine.Color.white;
+        }
+
+        private static void RemoveGeneratedRenderChildren(RectTransform parent)
+        {
+            if (parent == null)
             {
-                if (!child.TryGetComponent(out image))
+                return;
+            }
+
+            for (var i = parent.childCount - 1; i >= 0; i--)
+            {
+                var child = parent.GetChild(i);
+                if (child == null ||
+                    !string.Equals(child.name, "Render", StringComparison.Ordinal) ||
+                    child.GetComponent<Image>() == null)
                 {
-                    image = child.AddComponent<Image>();
+                    continue;
                 }
 
-                image.sprite = sprite;
-                image.enabled = true;
-                image.color = UnityEngine.Color.white;
-                t = TransformUtils.EnsureRectTransform(child, "Render child");
-                if (t != null)
-                {
-                    t.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, sprite.texture.width);
-                    t.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, sprite.texture.height);
-                }
+                UnityEngine.Object.DestroyImmediate(child.gameObject);
             }
         }
 
